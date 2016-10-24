@@ -62,6 +62,7 @@ void wake_scheduler()
 static const char userkey[] = "{\"rsa\" : \"MIIEowIBAAKCAQEAxAtcxUwkLs1m2cDOe7WtFxAr2BR4rsDLC9UlMlW1e/DJi4ShgGI8mx7pe7i1EvpYc0H3vQ/c01Q0CppZcZCRPFA3yhpYVjsPYDktesXG4OtHHGe5KDo+U+nFBY6lcBFqeKTZdKmFHNaNy+JhOHLjPPrJrqamsac/S1B8GGPm9Z3hqmfNkvOalgXfao+KLLnJLB48in6QvUMlNIplzI8ZM5/2D8jBm12jybrkaWNmD0Dq1Bx+PGwGgpeR29un09pyg4a/7AsZeJdO0VXKDZUpRR4SHaXFMkG3yiOO2iR67pOkteq1VtXEQPLaIl9aN5fo9NcQQIKrhce3gpO17lA9owIDAQABAoIBAQCvIPtZ4N/9003Kvnt2deBPVwnjuL3qVp3MTzcwVPKP6pURBoWDe75qUF4BQQq5DlzPcaHPCgmZ24G16xZ15dBoUbzU1V4OgioFKm7fWyiDqopW7K2yKv2c1ptDkJ9nkpdLePAtUHZyQZRgCzYQSEmJIvviAkutLhvTuu1wmGYtCLG9CRQJ2i0M1e3y54JVavr/JX0VRZtqvWkN6s9pcXKfz86buNEI8jU0EPq2gO0YCT9eahdIaZtkn4vmRluAMnYfs+Cacc8e8ZvglvH+fDvLCSlrK96/tG0dRIAzfN+A8PJ82ojkyhfBVSKFHYK/8GyIrEtBdU0v/bOTwM8gvS35AoGBAOV8ZdXyscSIe+tmpHiEIf3+R5AdRAAbd66tyjiTg1WyFpKsOq7O9NoxxCcw/5Jc1IfGtZ7FmjWCp5coIbcRkOXza84Q+apGzMK7zeWfeCsbs55mQ5aRDnHYx4/G0lonoPQNv7RVxiaEzm+VgeXvqHBZYKUscf8A9LpMhjOwlML1AoGBANqx2ZOH3YN7qUIhSaZIYiFJKnU7J2aYfqqEMpdmVazbzyy9qnLwE5AUBoDy/OrGuW/D6YNeT6ISJUfBF7JU71NeAdXY3wcYN2gOeD1mUNNdbMs2c/vY0gDQ6USG9gaaWmrgzrpTop2ILFKc6+b4gAfaL3Zz7yrbrgCVuvCCdg83AoGAaasjNSXAZ0+1R8qGlxu4jzzj9N8U7bu4G03Y3L5H7lDHhhgaGV4gbswVlzo/pERsdGyyOn6gqF0WEEshYyuKfefdTxCP9bEOHejeQQpyCd+CkMBkBNOcRB3enjydpXez7EzcZgxM5nWmnMjJ/HejJsBw+P2DLDljdtk/vlNj3HUCgYAqplalU/DaTIqU0AMZ/7HLhgZWuIOVmZXSUVfAeP+qZ2++7PpJ0hIungkqqriyXLEbX9yxdvoWxG0q0jh52eCWpJW9C79rFcjwbSn753FJ10V5WBREgGNsL1HewGdIoF+TymXmpprnGAB02A+Vis8FOQLamf+BnzgO+yRq9TZq/wKBgFhGMzVF24B13mZBiuHafBgtypl0NlkaABQMKP/YQxMe50UbowX8OpWQh4/vz+Zp5kWWSe8FnRMyIw0A5g4+oFXBSl6NQsYLqoY83vDRGoN4sMMJboJa5RzoPk8uIPmXS54KgmNGlSgWUmSkNB8sNX9DI87zfJk9wDmsuvZO8TN8\"}";
 void init_infinit()
 {
+  reactor::sleep(1_sec);
   /*while (true)
   {
     printf("CANARD\n");
@@ -83,7 +84,7 @@ void init_infinit()
      dht::consensus::replication_factor = 1);
   };
   printf("passport\n");
-  dht::Passport passport(keys->K(), "network-", *keys);
+  auto passport = new dht::Passport(keys->K(), "network-", *keys);
   infinit::overlay::kelips::Configuration conf;
   auto overlay = [&](
     dht::Doughnut& d,
@@ -99,15 +100,43 @@ void init_infinit()
     dht::id = infinit::model::Address::random(),
     dht::keys = keys,
     dht::owner = keys->public_key(),
-    dht::passport = passport,
+    dht::passport = *passport,
     dht::consensus_builder = consensus,
     dht::overlay_builder = overlay,
     dht::port = 6666,
     dht::storage = std::move(storage),
-    dht::protocol = dht::Protocol::utp
+    dht::protocol = dht::Protocol::all
     );
+  printf("DONE");
 }
 
+void init_tcp()
+{
+  reactor::sleep(1_sec);
+  auto s = new reactor::network::TCPServer();
+  s->listen(4444);
+  while (true)
+  {
+    auto tt = s->accept();
+    ELLE_LOG("new connection %s", tt->peer());
+    new reactor::Thread("hs", [t=tt.release()] {
+        try
+        {
+          reactor::sleep(3_sec);
+          while (true)
+          {
+            auto data = t->read_some(1024);
+            t->write(data);
+            reactor::sleep(2_sec);
+          }
+        }
+        catch(elle::Error const&e)
+        {
+          ELLE_LOG("tcp end: %s", e);
+        }
+    }, true);
+  }
+}
 void init_udp()
 {
   printf("INIT UDP\n");
@@ -179,6 +208,7 @@ void Service::start(const std::string&)
   Timers::oneshot(std::chrono::milliseconds(100), [](int) { sched_step();});
   
   new reactor::Thread(*sched, "init_udp", [] {init_udp();}, true);
+  new reactor::Thread(*sched, "init_tcp", [] {init_tcp();}, true);
 }
 
 #define NS_INADDRSZ 4

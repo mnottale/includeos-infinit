@@ -186,16 +186,241 @@
   }
 
 boost::asio::io_service::id IncludeOSUDPService::id;
+boost::asio::io_service::id IncludeOSTCPService::id;
+boost::asio::io_service::id IncludeOSTCPAcceptorService::id;
+IncludeOSTCPAcceptorService::IncludeOSTCPAcceptorService(boost::asio::io_service& io)
+: boost::asio::io_service::service(io)
+, stack(net::Inet4::stack<0>())
+{
+}
+
+void IncludeOSTCPAcceptorService::construct(IncludeOSTCPAcceptorHandle handle)
+{
+}
+void IncludeOSTCPAcceptorService::destroy(IncludeOSTCPAcceptorHandle handle)
+{
+}
+void IncludeOSTCPAcceptorService::shutdown_service()
+{
+}
+void IncludeOSTCPAcceptorService::move_construct(
+  IncludeOSTCPAcceptorHandle& to, IncludeOSTCPAcceptorHandle& from)
+{
+  to.listener = from.listener;
+  to.endpoint = from.endpoint;
+  to.target = from.target;
+  to.cb = from.cb;
+  from.listener = nullptr;
+  from.target = nullptr;
+  from.endpoint = endpoint();
+}
+bool IncludeOSTCPAcceptorService::is_open(
+  IncludeOSTCPAcceptorHandle const& h) const
+{
+  return h.listener;
+}
+boost::system::error_code
+IncludeOSTCPAcceptorService::close(IncludeOSTCPAcceptorHandle& h, error_code& ec)
+{
+  ec = error_code();
+  if (h.listener)
+    h.listener->close();
+  return ec;
+}
+int IncludeOSTCPAcceptorService::native_handle(IncludeOSTCPAcceptorHandle& h)
+{
+  return 0;
+}
+boost::system::error_code
+IncludeOSTCPAcceptorService::cancel(IncludeOSTCPAcceptorHandle& h, error_code& ec)
+{
+  ec = error_code();
+  return ec;
+}
+boost::asio::ip::tcp::endpoint IncludeOSTCPAcceptorService::local_endpoint(
+  IncludeOSTCPAcceptorHandle const& h, error_code& ec) const
+{
+  ec = error_code();
+  return h.endpoint;
+}
+boost::system::error_code IncludeOSTCPAcceptorService::listen(IncludeOSTCPAcceptorHandle& h, size_t, error_code& ec)
+{
+  ec = error_code();
+  return ec;
+}
+
+boost::system::error_code IncludeOSTCPAcceptorService::bind(
+  IncludeOSTCPAcceptorHandle& h, endpoint ep, error_code& ec)
+{
+  h.endpoint = ep;
+  h.listener = &stack.tcp().bind(ep.port());
+  h.listener->on_connect([&h](net::tcp::Connection_ptr c) {
+      if (h.cb)
+      {
+        assert(h.target);
+        h.target->assign(boost::asio::ip::tcp::v4(), c.get());
+        if (h.target_endpoint)
+          *h.target_endpoint = endpoint(
+            boost::asio::ip::address_v4(c->remote().address().whole),
+            c->remote().port());
+        auto f = h.cb;
+        h.cb = std::function<void(const error_code&)>();
+        h.target = nullptr;
+        new reactor::Thread("connect_cb", [f] { f(error_code());}, true);
+        wake_scheduler();
+      }
+      else
+        h.inbounds.push_back(c);
+  });
+  ec = error_code();
+  return ec;
+}
+void IncludeOSTCPAcceptorService::async_accept(IncludeOSTCPAcceptorHandle& h,
+  boost::asio::basic_socket<boost::asio::ip::tcp, IncludeOSTCPService>& tgt,
+  endpoint* ep,
+  AH ah)
+{
+  if (!h.inbounds.empty())
+  {
+    auto c = h.inbounds.front();
+    h.inbounds.erase(h.inbounds.begin());
+    tgt.assign(boost::asio::ip::tcp::v4(), c.get());
+    if (ep)
+     *ep = endpoint(
+       boost::asio::ip::address_v4(c->remote().address().whole),
+       c->remote().port());
+    new reactor::Thread("connect_direct_cb", [ah] { ah(error_code());}, true);
+    wake_scheduler();
+  }
+  else
+  {
+    h.target = &tgt;
+    h.target_endpoint = ep;
+    h.cb = ah;
+  }
+}
+
+IncludeOSTCPService::IncludeOSTCPService(boost::asio::io_service& io)
+: boost::asio::io_service::service(io)
+, stack(net::Inet4::stack<0>())
+{}
+
+bool IncludeOSTCPService::is_open(IncludeOSTCPHandle const& h) const
+{
+  return true;
+}
+void IncludeOSTCPService::construct(IncludeOSTCPHandle handle)
+{}
+void IncludeOSTCPService::destroy(IncludeOSTCPHandle handle)
+{}
+
+boost::system::error_code IncludeOSTCPService::close(IncludeOSTCPHandle& h, error_code& ec)
+{
+  ec = error_code();
+  return ec;
+}
+boost::system::error_code IncludeOSTCPService::cancel(IncludeOSTCPHandle& h, error_code& ec)
+{
+  ec = error_code();
+  return ec;
+}
+boost::system::error_code IncludeOSTCPService::shutdown(IncludeOSTCPHandle& h, boost::asio::socket_base::shutdown_type, error_code& ec)
+{
+  ec = error_code();
+  return ec;
+}
+  
+  
+void IncludeOSTCPService::shutdown_service()
+{
+}
+boost::asio::ip::tcp::endpoint
+IncludeOSTCPService::local_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const
+{
+  auto s = h.socket->local();
+  return endpoint(boost::asio::ip::address_v4(s.address().whole), s.port());
+}
+boost::asio::ip::tcp::endpoint
+IncludeOSTCPService::remote_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const
+{
+  auto s = h.socket->remote();
+  return endpoint(boost::asio::ip::address_v4(s.address().whole), s.port());
+}
+
+void IncludeOSTCPService::async_connect(IncludeOSTCPHandle& h, endpoint ep, CH cb)
+{
+  net::tcp::Socket s(net::ip4::Addr(ep.address().to_v4().to_ulong()), ep.port());
+  stack.tcp().connect(s, [&h, cb](net::tcp::Connection_ptr c) {
+      h.assign(c);
+      new reactor::Thread("connect", [cb] { cb(error_code());}, true);
+      wake_scheduler();
+  });
+}
+ 
+ 
+void IncludeOSTCPService::async_receive(
+  IncludeOSTCPHandle& h, boost::asio::mutable_buffer mb,
+  socket_base::message_flags f, RH cb)
+{
+  auto mbs = boost::asio::buffer_size(mb);
+  auto mbdata = boost::asio::buffer_cast<char*>(mb);
+  if (!h.read_buffer.empty())
+  {
+    auto rsz = std::min(mbs, h.read_buffer.size());
+    memcpy(mbdata, h.read_buffer.data(), rsz);
+    memmove((void*)h.read_buffer.data(), h.read_buffer.data()+rsz,
+      h.read_buffer.size() - rsz);
+    h.read_buffer.resize(h.read_buffer.size()-rsz);
+    new reactor::Thread("onread", [cb, rsz] { cb(error_code(), rsz);}, true);
+    wake_scheduler();
+  }
+  else
+  {
+    if (h.on_read_buffer)
+      printf("Warning, multiple // calls to async_receive!\n");
+    h.on_read_buffer = mbdata;
+    h.on_read_buffer_size = mbs;
+    h.on_read = cb;
+  }
+}
+void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
+                                     boost::asio::const_buffer cb,
+                                     socket_base::message_flags f, RH wh)
+{
+  auto mbs = boost::asio::buffer_size(cb);
+  auto mbdata = boost::asio::buffer_cast<const char*>(cb);
+  h.socket->write(mbdata, mbs, [wh](size_t len) {
+      new reactor::Thread("async_send", [wh, len] { wh(error_code(), len);}, true);
+      wake_scheduler();
+  });
+}
  
  
  
- 
- 
- 
- 
- 
- 
- 
+void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
+{
+  socket = c;
+  socket->on_read(4096, [this] (net::tcp::buffer_t sdata, size_t sz) {
+      unsigned char* data = sdata.get();
+      if (this->on_read_buffer)
+      {
+        auto rsz = std::min(sz, this->on_read_buffer_size);
+        memcpy(this->on_read_buffer, data, rsz);
+        sz -= rsz;
+        data = data + rsz;
+        this->on_read_buffer = nullptr;
+        this->on_read_buffer_size = 0;
+        auto cb = this->on_read;
+        this->on_read = decltype(this->on_read)();
+        new reactor::Thread("on_read", [cb, rsz] { cb(boost::system::error_code(), rsz);}, true);
+        wake_scheduler();
+      }
+      read_buffer.append((char*)data, (char*)data + sz);
+  });
+}
+
+
+
  IncludeOSTimerImpl::IncludeOSTimerImpl()
  :timer_id(Timers::UNUSED_ID)
  {}

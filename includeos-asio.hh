@@ -1,9 +1,18 @@
+#ifndef INCLUDEOS_ASIO_HH
+# define INCLUDEOS_ASIO_HH
 #include <boost/asio.hpp>
 
 
 namespace net {
   class Inet4;
   class UDPSocket;
+  class TCP;
+  namespace tcp {
+    class Connection;
+    class Socket;
+    class Listener;
+    using Connection_ptr = std::shared_ptr<Connection>;
+  }
 }
 class IncludeOSUDPHandle
 {
@@ -12,7 +21,7 @@ public:
    : local_port(-1)
    , socket(0)
    , on_read_endpoint(nullptr)
-   , on_read_buffer(nullptr)
+   , on_read_buffer(nullptr)               
   {}
   IncludeOSUDPHandle(IncludeOSUDPHandle const& b) = default;
   IncludeOSUDPHandle(IncludeOSUDPHandle&& b) = default;
@@ -42,13 +51,13 @@ public:
   void shutdown_service() override;
   void move_construct(IncludeOSUDPHandle& to, IncludeOSUDPHandle& from);
   template<typename P>
-  error_code open(IncludeOSUDPHandle& s, P p, error_code& ec)
+  error_code open(IncludeOSUDPHandle&, P, error_code& ec)
   {
     ec = error_code();
     return ec;
   }
   template<typename P>
-  error_code assign(IncludeOSUDPHandle& s, P p, IncludeOSUDPHandle& n, error_code& ec)
+  error_code assign(IncludeOSUDPHandle& s, P, IncludeOSUDPHandle& n, error_code& ec)
   {
     s.local_port = n.local_port;
     ec = error_code();
@@ -65,7 +74,7 @@ public:
   endpoint remote_endpoint(IncludeOSUDPHandle const& h, error_code& ec) const;
   error_code connect(IncludeOSUDPHandle& h, endpoint, error_code& ec);
   template<typename CB>
-  void async_connect(IncludeOSUDPHandle& h, endpoint, CB cb)
+  void async_connect(IncludeOSUDPHandle&, endpoint, CB)
   {
     std::cerr << "async_connect not implemented" << std::endl;
   }
@@ -90,14 +99,94 @@ public:
 typedef boost::asio::basic_datagram_socket<boost::asio::ip::udp, IncludeOSUDPService>
 IncludeOSUDPSocket;
 
-class IncludeOSTCPSocket;
+
+class IncludeOSTCPHandle
+{
+public:
+  IncludeOSTCPHandle()
+   : on_read_buffer(nullptr)
+  {}
+  IncludeOSTCPHandle(IncludeOSTCPHandle const& b) = default;
+  IncludeOSTCPHandle(IncludeOSTCPHandle&& b) = default;
+  void assign(net::tcp::Connection_ptr c);
+  net::tcp::Connection_ptr socket;
+  std::string read_buffer;
+  void* on_read_buffer;
+  size_t on_read_buffer_size;
+  std::function<void(const boost::system::error_code& ec, std::size_t)> on_read;
+};
+
+
+class IncludeOSTCPService:public boost::asio::io_service::service
+{
+public:
+  static boost::asio::io_service::id id;
+  typedef IncludeOSTCPHandle implementation_type;
+  typedef void* native_handle_type;
+  typedef boost::asio::ip::tcp::endpoint endpoint;
+  typedef boost::system::error_code error_code;
+  typedef boost::asio::socket_base socket_base;
+  typedef boost::asio::const_buffer const_buffer;
+  typedef std::function<void(const error_code& ec, std::size_t)> RH;
+  typedef std::function<void(const error_code& ec)> CH;
+  IncludeOSTCPService(boost::asio::io_service& io);
+  void construct(IncludeOSTCPHandle handle);
+  void destroy(IncludeOSTCPHandle handle);
+  void shutdown_service() override;
+  void move_construct(IncludeOSTCPHandle& to, IncludeOSTCPHandle& from);
+  template<typename...T>
+  error_code set_option(T... args)
+  {
+    return error_code();
+  }
+  template<typename P>
+  error_code open(IncludeOSTCPHandle& s, P p, error_code& ec)
+  {
+    ec = error_code();
+    return ec;
+  }
+  template<typename P>
+  error_code assign(IncludeOSTCPHandle& s, P p, void* n, error_code& ec)
+  {
+    s.assign(net::tcp::Connection_ptr((net::tcp::Connection*)n));
+    ec = error_code();
+    return ec;
+  }
+  bool is_open(IncludeOSTCPHandle const& h) const;
+  error_code close(IncludeOSTCPHandle& h, error_code& ec);
+  int native_handle(IncludeOSTCPHandle& h);
+  error_code cancel(IncludeOSTCPHandle& h, error_code& ec);
+  size_t available(IncludeOSTCPHandle& h);
+  error_code bind(IncludeOSTCPHandle& h, boost::asio::ip::tcp::endpoint ep, error_code& ec);
+  error_code shutdown(IncludeOSTCPHandle& h, boost::asio::socket_base::shutdown_type, error_code& ec);
+  endpoint local_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const;
+  endpoint remote_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const;
+  error_code connect(IncludeOSTCPHandle& h, endpoint, error_code& ec);
+  void async_connect(IncludeOSTCPHandle& h, endpoint, CH cb);
+  void async_receive(IncludeOSTCPHandle& b, boost::asio::mutable_buffer mb,
+    socket_base::message_flags f, RH cb);
+  void async_send(IncludeOSTCPHandle& b, boost::asio::const_buffer cb,
+                     socket_base::message_flags f, RH wh);
+  net::Inet4& stack;
+};
+
+typedef boost::asio::basic_stream_socket<boost::asio::ip::tcp, IncludeOSTCPService>
+IncludeOSTCPSocket;
+
 class IncludeOSTCPAcceptorHandle
 {
 public:
-  ip::tcp::Listener* listener;
+  IncludeOSTCPAcceptorHandle()
+  : listener(nullptr)
+  , target(nullptr)
+  {}
+  net::tcp::Listener* listener;
   boost::asio::ip::tcp::endpoint endpoint;
-  IncludeOSTCPSocketHandle* target;
-  std::function<void(const error_code&)> cb;
+  
+  boost::asio::basic_socket<boost::asio::ip::tcp, IncludeOSTCPService>* target;
+  boost::asio::ip::tcp::endpoint* target_endpoint;
+  std::function<void(const boost::system::error_code&)> cb;
+  std::vector<net::tcp::Connection_ptr> inbounds;
 };
 
 class IncludeOSTCPAcceptorService:public boost::asio::io_service::service
@@ -111,96 +200,37 @@ public:
   typedef std::function<void(const error_code&)> AH;
 
   IncludeOSTCPAcceptorService(boost::asio::io_service& io);
-  void construct(IncludeOSTCAcceptorPHandle handle);
+  void construct(IncludeOSTCPAcceptorHandle handle);
   void destroy(IncludeOSTCPAcceptorHandle handle);
   void shutdown_service() override;
   void move_construct(IncludeOSTCPAcceptorHandle& to, IncludeOSTCPAcceptorHandle& from);
+  template<typename P>
+  error_code open(IncludeOSTCPAcceptorHandle& s, P p, error_code& ec)
+  {
+    ec = error_code();
+    return ec;
+  }
+  template<typename...T>
+  error_code set_option(T... args)
+  {
+    return error_code();
+  }
   bool is_open(IncludeOSTCPAcceptorHandle const& h) const;
   error_code close(IncludeOSTCPAcceptorHandle& h, error_code& ec);
   int native_handle(IncludeOSTCPAcceptorHandle& h);
   error_code cancel(IncludeOSTCPAcceptorHandle& h, error_code& ec);
   endpoint local_endpoint(IncludeOSTCPAcceptorHandle const& h, error_code& ec) const;
   error_code bind(IncludeOSTCPAcceptorHandle& h, endpoint ep, error_code& ec);
+  error_code listen(IncludeOSTCPAcceptorHandle& h, size_t, error_code& ec);
   void async_accept(IncludeOSTCPAcceptorHandle& h,
-                    IncludeOSTCPHandle& tgt,
+                    boost::asio::basic_socket<boost::asio::ip::tcp, IncludeOSTCPService>& tgt,
                     endpoint* ep,
                     AH ah);
-};
-
-class IncludeOSTCPHandle
-{
-public:
-  IncludeOSTCPHandle()
-   : local_port(-1)
-   , socket(0)
-   , on_read_endpoint(nullptr)
-   , on_read_buffer(nullptr)
-  {}
-  IncludeOSTCPHandle(IncludeOSTCPHandle const& b) = default;
-  IncludeOSTCPHandle(IncludeOSTCPHandle&& b) = default;
-
-  net::tcp::Connection* socket;
-  std::string read_buffer;
-  void* on_read_buffer;
-  size_t on_read_buffer_size;
-  std::function<void(const boost::system::error_code& ec, std::size_t)> on_read;
-};
-
-class IncludeOSTCPService:public boost::asio::io_service::service
-{
-public:
-  static boost::asio::io_service::id id;
-  typedef IncludeOSTCPHandle implementation_type;
-  typedef int native_handle_type;
-  typedef boost::asio::ip::tcp::endpoint endpoint;
-  typedef boost::system::error_code error_code;
-  typedef boost::asio::socket_base socket_base;
-  typedef boost::asio::const_buffer const_buffer;
-  typedef std::function<void(const error_code& ec, std::size_t)> RH;
-  IncludeOSTCPService(boost::asio::io_service& io);
-  void construct(IncludeOSTCPHandle handle);
-  void destroy(IncludeOSTCPHandle handle);
-  void shutdown_service() override;
-  void move_construct(IncludeOSTCPHandle& to, IncludeOSTCPHandle& from);
-  template<typename P>
-  error_code open(IncludeOSTCPHandle& s, P p, error_code& ec)
-  {
-    ec = error_code();
-    return ec;
-  }
-  template<typename P>
-  error_code assign(IncludeOSTCPHandle& s, P p, IncludeOSTCPHandle& n, error_code& ec)
-  {
-    s.local_port = n.local_port;
-    ec = error_code();
-    return ec;
-  }
-  bool is_open(IncludeOSTCPHandle const& h) const;
-  error_code close(IncludeOSTCPHandle& h, error_code& ec);
-  int native_handle(IncludeOSTCPHandle& h);
-  error_code cancel(IncludeOSTCPHandle& h, error_code& ec);
-  size_t available(IncludeOSTCPHandle& h);
-  error_code bind(IncludeOSTCPHandle& h, boost::asio::ip::TCP::endpoint ep, error_code& ec);
-  error_code shutdown(IncludeOSTCPHandle& h, boost::asio::socket_base::shutdown_type, error_code& ec);
-  endpoint local_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const;
-  endpoint remote_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const;
-  error_code connect(IncludeOSTCPHandle& h, endpoint, error_code& ec);
-  template<typename CB>
-  void async_connect(IncludeOSTCPHandle& h, endpoint, CB cb)
-  {
-    
-  }
-  void async_receive(IncludeOSTCPHandle& b, boost::asio::mutable_buffer mb,
-    socket_base::message_flags f, RH cb)
-  {
-    std::cerr << "async_receive not implemented" << std::endl;
-  }
-  void async_send(IncludeOSTCPHandle& b, boost::asio::const_buffer cb,
-                     socket_base::message_flags f, RH wh)
-  {
-  }
   net::Inet4& stack;
 };
+
+typedef boost::asio::basic_socket_acceptor<boost::asio::ip::tcp, IncludeOSTCPAcceptorService>
+IncludeOSTCPAcceptor;
 
 typedef std::function<void(const boost::system::error_code&)> WaitHandler;
 class IncludeOSTimerImpl
@@ -241,3 +271,4 @@ typedef boost::asio::basic_deadline_timer<
   boost::asio::time_traits<boost::posix_time::ptime>,
   IncludeOSTimerService> IncludeOSTimer;
 
+#endif

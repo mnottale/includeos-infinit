@@ -65,6 +65,7 @@ LOCAL_INCLUDES= \
  -I/home/bearclaw/projects/fs/_build/mirage/elle/boost/1.60.0/include \
  -I/home/bearclaw/projects/fs/_build/mirage/elle/openssl/include \
  -DINCLUDEOS \
+ -DMIRAGE \
  -DBOOST_ASIO_BASIC_SERIAL_PORT_HPP \
  -DBOOST_ASIO_SERIAL_PORT_BASE_HPP \
  -DBOOST_ASIO_SERIAL_PORT_HPP \
