@@ -42,7 +42,6 @@ reactor::Scheduler* sched = 0;
 bool scheduler_sleeping = false;
 void sched_step()
 {
-  printf("sched step %ld\n", sched);
   scheduler_sleeping = false; 
   while (sched->step())
     ;
@@ -122,12 +121,10 @@ void init_tcp()
     new reactor::Thread("hs", [t=tt.release()] {
         try
         {
-          reactor::sleep(3_sec);
           while (true)
           {
-            auto data = t->read_some(1024);
+            auto data = t->read(5);
             t->write(data);
-            reactor::sleep(2_sec);
           }
         }
         catch(elle::Error const&e)
@@ -176,9 +173,10 @@ extern "C" void _init();
 StaticInit test;
 void Service::start(const std::string&)
 {
+  printf("%d %d %d %d\n", (int)ntohl(1), (int)ntohl(0x100), (int)ntohs(1), (int)htons(0x100));
   setenv("ELLE_LOG_LEVEL", "DUMP", 1);
   setenv("INFINIT_RDV", "", 1);
-  //setenv("INFINIT_NO_IPV6", "1", 1);
+  setenv("INFINIT_NO_IPV6", "1", 1);
   printf("Hello world - OS included!\n");
   write(1, "COIN\n", 5);
   //__cxx_global_var_init();
@@ -452,10 +450,10 @@ extern "C"  const char *inet_ntop(int af, const void *src,
     return inet_ntop6((const unsigned char*)src, dst, size);
   const unsigned char* csrc = (const unsigned char*)src;
   sprintf(dst, "%d.%d.%d.%d",
-    (unsigned int)csrc[0],
-    (unsigned int)csrc[1],
+    (unsigned int)csrc[3],
     (unsigned int)csrc[2],
-    (unsigned int)csrc[3]);
+    (unsigned int)csrc[1],
+    (unsigned int)csrc[0]);
   printf("ntop: %s\n", dst);
   return dst;
 }

@@ -18,7 +18,7 @@ extern "C" {
   unsigned int ntohl(unsigned int v)
   {
     unsigned char*ptr = (unsigned char*)(void*)&v;
-    return ptr[0] + (ptr[1] << 8) + (ptr[2] << 16) + (ptr[3]  << 24);
+    return ptr[3] + (ptr[2] << 8) + (ptr[1] << 16) + (ptr[0]  << 24);
   }
   unsigned int htonl(unsigned int v)
   {
@@ -27,7 +27,7 @@ extern "C" {
   unsigned short ntohs(unsigned short v)
   {
     unsigned char*ptr = (unsigned char*)(void*)&v;
-    return ptr[0] + (ptr[1] << 8);
+    return ptr[1] + (ptr[0] << 8);
   }
   unsigned short htons(unsigned short v)
   {

@@ -362,8 +362,11 @@ void IncludeOSTCPService::async_receive(
   IncludeOSTCPHandle& h, boost::asio::mutable_buffer mb,
   socket_base::message_flags f, RH cb)
 {
+  if (h.on_read_buffer)
+    printf("Warning, multiple // calls to async_receive!\n");
   auto mbs = boost::asio::buffer_size(mb);
   auto mbdata = boost::asio::buffer_cast<char*>(mb);
+  printf("async_receive %d, buffered=%d\n", (int)mbs, (int)h.read_buffer.size());
   if (!h.read_buffer.empty())
   {
     auto rsz = std::min(mbs, h.read_buffer.size());
@@ -371,6 +374,7 @@ void IncludeOSTCPService::async_receive(
     memmove((void*)h.read_buffer.data(), h.read_buffer.data()+rsz,
       h.read_buffer.size() - rsz);
     h.read_buffer.resize(h.read_buffer.size()-rsz);
+    printf("remaining in buffer: %d\n", (int)h.read_buffer.size());
     new reactor::Thread("onread", [cb, rsz] { cb(error_code(), rsz);}, true);
     wake_scheduler();
   }
@@ -381,6 +385,7 @@ void IncludeOSTCPService::async_receive(
     h.on_read_buffer = mbdata;
     h.on_read_buffer_size = mbs;
     h.on_read = cb;
+    printf("arming waiter=%d\n", (int)mbs);
   }
 }
 void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
@@ -401,13 +406,18 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
 {
   socket = c;
   socket->on_read(4096, [this] (net::tcp::buffer_t sdata, size_t sz) {
+      printf("on_read %d, buffered=%d waiter=%d\n",
+        (int)sz, (int)this->read_buffer.size(), (int)this->on_read_buffer_size);
       unsigned char* data = sdata.get();
       if (this->on_read_buffer)
       {
+        if (!read_buffer.empty())
+          printf("WARNING IMPOSSIBLE STATE\n");
         auto rsz = std::min(sz, this->on_read_buffer_size);
         memcpy(this->on_read_buffer, data, rsz);
         sz -= rsz;
         data = data + rsz;
+        read_buffer.append((char*)data, (char*)data + sz);
         this->on_read_buffer = nullptr;
         this->on_read_buffer_size = 0;
         auto cb = this->on_read;
@@ -415,7 +425,9 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
         new reactor::Thread("on_read", [cb, rsz] { cb(boost::system::error_code(), rsz);}, true);
         wake_scheduler();
       }
-      read_buffer.append((char*)data, (char*)data + sz);
+      else
+        read_buffer.append((char*)data, (char*)data + sz);
+      printf("rb remain: %d\n", (int)read_buffer.size());
   });
 }
 
