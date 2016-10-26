@@ -82,14 +82,8 @@ namespace boost
    class microsec_clock
    {
    public:
-     static boost::posix_time::ptime universal_time()
-     {
-       return  boost::posix_time::ptime();
-     }
-     static boost::posix_time::ptime local_time()
-     {
-       return  boost::posix_time::ptime();
-     }
+     static boost::posix_time::ptime universal_time();
+     static boost::posix_time::ptime local_time();
    };
  }
  /*

@@ -273,6 +273,7 @@ boost::system::error_code IncludeOSTCPAcceptorService::bind(
         h.inbounds.push_back(c);
   });
   ec = error_code();
+  printf("BOUND TO %d\n", (int)ep.port());
   return ec;
 }
 void IncludeOSTCPAcceptorService::async_accept(IncludeOSTCPAcceptorHandle& h,
@@ -362,6 +363,11 @@ void IncludeOSTCPService::async_receive(
   IncludeOSTCPHandle& h, boost::asio::mutable_buffer mb,
   socket_base::message_flags f, RH cb)
 {
+  if (h.closed)
+  {
+    new reactor::Thread("closed", [cb] { cb(boost::asio::error::eof, 0);}, true);
+    return;
+  }
   if (h.on_read_buffer)
     printf("Warning, multiple // calls to async_receive!\n");
   auto mbs = boost::asio::buffer_size(mb);
@@ -392,9 +398,16 @@ void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
                                      boost::asio::const_buffer cb,
                                      socket_base::message_flags f, RH wh)
 {
+  if (h.closed)
+  {
+    new reactor::Thread("closed", [wh] { wh(boost::asio::error::eof, 0);}, true);
+    return;
+  }
   auto mbs = boost::asio::buffer_size(cb);
   auto mbdata = boost::asio::buffer_cast<const char*>(cb);
-  h.socket->write(mbdata, mbs, [wh](size_t len) {
+  h.on_write = wh;
+  h.socket->write(mbdata, mbs, [&h, wh](size_t len) {
+      h.on_write = decltype(h.on_write)();
       new reactor::Thread("async_send", [wh, len] { wh(error_code(), len);}, true);
       wake_scheduler();
   });
@@ -428,6 +441,20 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
       else
         read_buffer.append((char*)data, (char*)data + sz);
       printf("rb remain: %d\n", (int)read_buffer.size());
+  });
+  socket->on_close([this] () {
+      printf("ON_CLOSE\n");
+      this->closed = true;
+      if (this->on_read)
+      {
+        on_read(boost::asio::error::eof, 0);
+        on_read = decltype(on_read)();
+      }
+      if (this->on_write)
+      {
+        on_write(boost::asio::error::eof, 0);
+        on_write = decltype(on_write)();
+      }
   });
 }
 

@@ -17,6 +17,7 @@
 
 #include <service>
 #include <timers>
+#include <os> // Literally! \o/
 #include <cstdio>
 
 #include <elle/log.hh>
@@ -454,7 +455,6 @@ extern "C"  const char *inet_ntop(int af, const void *src,
     (unsigned int)csrc[2],
     (unsigned int)csrc[1],
     (unsigned int)csrc[0]);
-  printf("ntop: %s\n", dst);
   return dst;
 }
 
@@ -471,4 +471,39 @@ extern "C" int aainet_pton(int af, const char *src, void *dst)
   for (int i=0; i<4; ++i)
     cdst[i] = std::stoi(elems[i]);
   return 1;*/
+}
+
+static const int FNM_NOMATCH = 1;
+extern "C" int fnmatch(const char *pattern, const char *string, int flags)
+  {
+    if (!pattern || !string)
+      return -1;
+    //printf("fnmatch %s %s\n", pattern, string);
+    std::string pat(pattern);
+    std::string str(string);
+    if (pat == "*")
+      return 0;
+    if (pat[0] == '*' && pat[pat.size()-1] == '*')
+      return (str.find(pat.substr(1, pat.size()-2)) == str.npos) ? FNM_NOMATCH : 0;
+    if (pat[0] == '*')
+      return (str.find(pat.substr(1)) == str.size() - pat.size()-1) ? 0 : FNM_NOMATCH;
+    if (pat[pat.size()-1] == '*')
+      return (str.find(pat.substr(1)) == 0) ? 0 : FNM_NOMATCH;
+    return pat == str ? 0 : FNM_NOMATCH;
+    return FNM_NOMATCH;
+  }
+  
+namespace boost
+{
+  namespace posix_time
+  {
+    boost::posix_time::ptime microsec_clock::local_time()
+    {
+      return ptime() + boost::posix_time::microseconds(OS::micros_since_boot());
+    }
+    boost::posix_time::ptime microsec_clock::universal_time()
+    {
+      return local_time();
+    }
+  }
 }

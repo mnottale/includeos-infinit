@@ -33,7 +33,6 @@ extern "C" {
   {
     return ntohs(v);
   }
-
   //DUMMY(inet_ntop)
   DUMMY(if_indextoname)
  DUMMY(accept)
@@ -52,7 +51,6 @@ extern "C" {
  DUMMY(dlsym)
  DUMMY(execvp)
  DUMMY(fchdir)
- DUMMY(fnmatch)
  DUMMY(freeaddrinfo)
  DUMMY(getaddrinfo)
  DUMMY(getegid)

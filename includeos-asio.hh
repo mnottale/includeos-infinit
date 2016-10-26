@@ -105,6 +105,7 @@ class IncludeOSTCPHandle
 public:
   IncludeOSTCPHandle()
    : on_read_buffer(nullptr)
+   , closed(false)
   {}
   IncludeOSTCPHandle(IncludeOSTCPHandle const& b) = default;
   IncludeOSTCPHandle(IncludeOSTCPHandle&& b) = default;
@@ -114,6 +115,8 @@ public:
   void* on_read_buffer;
   size_t on_read_buffer_size;
   std::function<void(const boost::system::error_code& ec, std::size_t)> on_read;
+  std::function<void(const boost::system::error_code& ec, std::size_t)> on_write;
+  bool closed;
 };
 
 
