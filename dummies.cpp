@@ -1,4 +1,4 @@
-
+#include <stdexcept>
 extern "C" {
  int strlen(char* v);
  int write(int, char*, int);
@@ -14,7 +14,12 @@ extern "C" {
    write(1, #name " not implemented\n", strlen(#name " not implemented\n")); \
    return ret; \
  }
-
+ #define TDUMMY(name) \
+ int name() { \
+   write(1, #name " not implemented\n", strlen(#name " not implemented\n")); \
+   throw std::runtime_error(#name " not implemented"); \
+ }
+ 
   unsigned int ntohl(unsigned int v)
   {
     unsigned char*ptr = (unsigned char*)(void*)&v;
@@ -65,7 +70,7 @@ extern "C" {
  DUMMY(open64)
  DUMMY(opendir)
  DUMMY(openlog)
- DUMMY(pipe)
+ RDUMMY(pipe, -1)
  DUMMY(poll)
  DUMMY(readdir)
  DUMMY(readdir64)
@@ -82,7 +87,8 @@ extern "C" {
  DUMMY(setuid)
  DUMMY(shutdown)
  DUMMY(sigaction)
- DUMMY(socket)
+ RDUMMY(socket, -1)
+ //TDUMMY(socket)
  DUMMY(statvfs64)
  DUMMY(symlink)
  DUMMY(sysconf)
@@ -103,11 +109,19 @@ extern "C" {
  DUMMY(lstat)
  DUMMY(fchmodat)
  DUMMY(truncate)
- DUMMY(___xpg_strerror_r)
+ //TDUMMY(___xpg_strerror_r)
  DUMMY(getgid)
  DUMMY(gethostbyname)
  DUMMY(getservbyname)
  DUMMY(closelog)
  DUMMY(sendto)
  DUMMY(recvfrom)
+
+extern "C" void strcpy(char*, const char*);
+int ___xpg_strerror_r(int errnum, char * buf, unsigned int buflen)
+{
+  if (buflen > 5)
+    strcpy(buf, "boum");
+  return 0;
+}
 }

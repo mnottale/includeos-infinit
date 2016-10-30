@@ -7,16 +7,27 @@
  using namespace net;
  void wake_scheduler();
  
- 
-   IncludeOSUDPService::IncludeOSUDPService(boost::asio::io_service& io)
-    : boost::asio::io_service::service(io)
-    , stack(net::Inet4::ifconfig<0>(10))
-    {
-      printf("INIT SERVICE\n");
-      stack.network_config({ 10,0,0,42 },      // IP
+ static const bool debug_net = false;
+ net::Inet4& get_stack()
+ {
+   static net::Inet4& stack = net::Inet4::ifconfig<0>(10);
+   static bool init = false;
+   if (!init)
+   {
+     init = true;
+     stack.network_config({ 10,0,0,42 },      // IP
                            { 255,255,255,0 },  // Netmask
                            { 10,0,0,1 },       // Gateway
                            { 8,8,8,8 });       // DNS
+   }
+   return stack;
+ }
+ 
+   IncludeOSUDPService::IncludeOSUDPService(boost::asio::io_service& io)
+    : boost::asio::io_service::service(io)
+    , stack(get_stack())
+    {
+      if (debug_net) printf("INIT SERVICE\n");
     }
   void IncludeOSUDPService::construct(IncludeOSUDPHandle handle)
   {
@@ -28,7 +39,7 @@
   void IncludeOSUDPService::shutdown_service() {}
   void IncludeOSUDPService::move_construct(IncludeOSUDPHandle& to, IncludeOSUDPHandle& from)
   {
-    printf("SOCKET MOVE\n");
+    if (debug_net) printf("SOCKET MOVE\n");
     to.local_port = from.local_port;
     from.local_port = -1;
   }
@@ -44,13 +55,31 @@
   }
   int IncludeOSUDPService::native_handle(IncludeOSUDPHandle& h)
   {
-    printf("NH\n");
+    if (debug_net) printf("NH\n");
     return 0;
   }
 
   boost::system::error_code IncludeOSUDPService::cancel(IncludeOSUDPHandle& h, error_code& ec)
   {
-    printf("cancel\n");
+    if (debug_net) printf("cancel\n");
+    if (h.on_read)
+    {
+      auto handler = h.on_read;
+      h.on_read = decltype(h.on_read)();
+      h.on_read_buffer = nullptr;
+      new reactor::Thread("cancel", [handler] {
+          handler(boost::asio::error::operation_aborted, 0);
+      }, true);
+    }
+    if (h.on_write)
+    {
+      auto handler = h.on_write;
+      h.on_write = decltype(h.on_write)();
+      new reactor::Thread("cancel", [handler] {
+          handler(boost::asio::error::operation_aborted, 0);
+      }, true);
+    }
+    wake_scheduler();
     ec = error_code();
     return ec;
   }
@@ -60,15 +89,15 @@
   }
   boost::system::error_code IncludeOSUDPService::bind(IncludeOSUDPHandle& h, boost::asio::ip::udp::endpoint ep, error_code& ec)
   {
-    printf("bind %d\n", ep.port());
+    if (debug_net) printf("bind %d\n", ep.port());
     h.local_port = ep.port();
     ec = error_code();
     h.socket = &stack.udp().bind(h.local_port);
     h.socket->on_read(
       [&s=h](IP4::addr addr, UDP::port_t port, const char* data, size_t size) {
-        printf("ON_READ %d\n", size);
-        auto ep = endpoint(boost::asio::ip::address_v4(addr.whole), port);
-        //printf("GOT EP %s %d\n",
+        if (debug_net) printf("ON_READ %d\n", size);
+        auto ep = endpoint(boost::asio::ip::address_v4(::ntohl(addr.whole)), port);
+        //if (debug_net) printf("GOT EP %s %d\n",
         //  ep.address().to_string().c_str(), ep.port());
         if (s.on_read)
         {
@@ -80,7 +109,7 @@
           s.on_read_endpoint = nullptr;
           auto cb = s.on_read;
           s.on_read = RH();
-          printf("INVOKE CB %d\n", sz);
+          if (debug_net) printf("INVOKE CB %d\n", sz);
           new reactor::Thread("recvfrom_cb", [cb, sz] {
               cb(error_code(), sz);
           }, true);
@@ -121,7 +150,7 @@
                                                socket_base::message_flags f,
                                                RH rh)
   {
-    printf("ARF\n");
+    if (debug_net) printf("ARF\n");
     auto bsz = boost::asio::buffer_size(mb);
     void* data = boost::asio::buffer_cast<char*>(mb);
     if (!h.read_buffers.empty())
@@ -139,7 +168,7 @@
     else
     {
       if (h.on_read)
-        printf("Warning, multiple parallel calls to async_receive_from\n");
+        if (debug_net) printf("Warning, multiple parallel calls to async_receive_from\n");
       h.on_read = rh;
       h.on_read_buffer = data;
       h.on_read_buffer_size = bsz;
@@ -151,35 +180,45 @@
                                           endpoint e,
                                           socket_base::message_flags f, RH wh)
   {
-    printf("AST %s %d\n", e.address().to_string().c_str(), e.port());
+    if (debug_net) printf("AST %s %d\n", e.address().to_string().c_str(), e.port());
     auto bsize = boost::asio::buffer_size(cb);
     const void* bdata = boost::asio::buffer_cast<const char*>(cb);
-    printf("backend sendto %d\n", (int)bsize);
-    std::string addr;
+    if (debug_net) printf("backend sendto %d\n", (int)bsize);
+    boost::asio::ip::address_v4 addr;
     if (e.address().is_v6())
     {
       auto v6 = e.address().to_v6();
       if (v6.is_v4_mapped())
-        addr = v6.to_v4().to_string();
+      {
+        addr = v6.to_v4();
+      }
       else
         elle::err("V6 address not supported");
     }
     else
-      addr = e.address().to_v4().to_string();
-    printf("ACVT %s %d %d\n", addr.c_str(), e.port(), (int)bsize);
-    h.socket->sendto(addr, e.port(), bdata, bsize,
-      [wh, bsize] {
-        printf("sendto CB backend\n");
+      addr = e.address().to_v4();
+    if (debug_net) printf("ACVT %s %d %d conv %s\n", addr.to_string().c_str(), e.port(),
+           (int)bsize, net::ip4::Addr(::ntohl(addr.to_ulong())).str().c_str());
+    h.on_write = wh;
+    h.socket->sendto(::ntohl(addr.to_ulong()), e.port(), bdata, bsize,
+      [&h, wh, bsize] {
+        if (debug_net) printf("sendto CB backend\n");
+        if (!h.on_write)
+        {
+          if (debug_net) printf("on_write was reset, operation aborted\n");
+          return;
+        }
+        h.on_write = decltype(h.on_write)();
         new reactor::Thread("sendto_cb", [wh, bsize] {
             wh(error_code(), bsize);
-            printf("sendto CB backend wh called\n");
+            if (debug_net) printf("sendto CB backend wh called\n");
         }, true);
         wake_scheduler();
       });
     /*
         Timers::oneshot(std::chrono::milliseconds(0), [wh, bsize](int) {
             wh(error_code(), bsize);
-            printf("sendto CB backend wh called\n");
+            if (debug_net) printf("sendto CB backend wh called\n");
             wake_scheduler();
         });
       });*/
@@ -190,7 +229,7 @@ boost::asio::io_service::id IncludeOSTCPService::id;
 boost::asio::io_service::id IncludeOSTCPAcceptorService::id;
 IncludeOSTCPAcceptorService::IncludeOSTCPAcceptorService(boost::asio::io_service& io)
 : boost::asio::io_service::service(io)
-, stack(net::Inet4::stack<0>())
+, stack(get_stack())
 {
 }
 
@@ -222,6 +261,7 @@ bool IncludeOSTCPAcceptorService::is_open(
 boost::system::error_code
 IncludeOSTCPAcceptorService::close(IncludeOSTCPAcceptorHandle& h, error_code& ec)
 {
+  if (debug_net) printf("################## AS CLOSE\n");
   ec = error_code();
   if (h.listener)
     h.listener->close();
@@ -234,6 +274,18 @@ int IncludeOSTCPAcceptorService::native_handle(IncludeOSTCPAcceptorHandle& h)
 boost::system::error_code
 IncludeOSTCPAcceptorService::cancel(IncludeOSTCPAcceptorHandle& h, error_code& ec)
 {
+  if (debug_net) printf("AS CANCEL\n");
+  if (h.cb)
+  {
+    auto handler = h.cb;
+    h.cb = decltype(h.cb)();
+    h.target = nullptr;
+    h.target_endpoint = nullptr;
+    new reactor::Thread("cancel", [handler] {
+      handler(boost::asio::error::operation_aborted);
+    }, true);
+    wake_scheduler();
+  }
   ec = error_code();
   return ec;
 }
@@ -255,17 +307,21 @@ boost::system::error_code IncludeOSTCPAcceptorService::bind(
   h.endpoint = ep;
   h.listener = &stack.tcp().bind(ep.port());
   h.listener->on_connect([&h](net::tcp::Connection_ptr c) {
+      if (debug_net) printf("on_connect %d\n", (int)!!h.cb);
       if (h.cb)
       {
         assert(h.target);
-        h.target->assign(boost::asio::ip::tcp::v4(), c.get());
+        h.target->assign(boost::asio::ip::tcp::v4(), &c);
+        if (debug_net) printf("assigned\n");
         if (h.target_endpoint)
           *h.target_endpoint = endpoint(
-            boost::asio::ip::address_v4(c->remote().address().whole),
+            boost::asio::ip::address_v4(::ntohl(c->remote().address().whole)),
             c->remote().port());
         auto f = h.cb;
         h.cb = std::function<void(const error_code&)>();
         h.target = nullptr;
+        h.target_endpoint = nullptr;
+        if (debug_net) printf("signaling\n");
         new reactor::Thread("connect_cb", [f] { f(error_code());}, true);
         wake_scheduler();
       }
@@ -273,7 +329,7 @@ boost::system::error_code IncludeOSTCPAcceptorService::bind(
         h.inbounds.push_back(c);
   });
   ec = error_code();
-  printf("BOUND TO %d\n", (int)ep.port());
+  if (debug_net) printf("BOUND TO %d\n", (int)ep.port());
   return ec;
 }
 void IncludeOSTCPAcceptorService::async_accept(IncludeOSTCPAcceptorHandle& h,
@@ -285,16 +341,18 @@ void IncludeOSTCPAcceptorService::async_accept(IncludeOSTCPAcceptorHandle& h,
   {
     auto c = h.inbounds.front();
     h.inbounds.erase(h.inbounds.begin());
-    tgt.assign(boost::asio::ip::tcp::v4(), c.get());
+    tgt.assign(boost::asio::ip::tcp::v4(), &c);
     if (ep)
      *ep = endpoint(
-       boost::asio::ip::address_v4(c->remote().address().whole),
+       boost::asio::ip::address_v4(::ntohl(c->remote().address().whole)),
        c->remote().port());
     new reactor::Thread("connect_direct_cb", [ah] { ah(error_code());}, true);
     wake_scheduler();
   }
   else
   {
+    if (h.cb)
+      if (debug_net) printf("#### multiple async_accept calls\n");
     h.target = &tgt;
     h.target_endpoint = ep;
     h.cb = ah;
@@ -303,12 +361,12 @@ void IncludeOSTCPAcceptorService::async_accept(IncludeOSTCPAcceptorHandle& h,
 
 IncludeOSTCPService::IncludeOSTCPService(boost::asio::io_service& io)
 : boost::asio::io_service::service(io)
-, stack(net::Inet4::stack<0>())
+, stack(get_stack())
 {}
 
 bool IncludeOSTCPService::is_open(IncludeOSTCPHandle const& h) const
 {
-  return true;
+  return !h.closed;
 }
 void IncludeOSTCPService::construct(IncludeOSTCPHandle handle)
 {}
@@ -317,6 +375,14 @@ void IncludeOSTCPService::destroy(IncludeOSTCPHandle handle)
 
 boost::system::error_code IncludeOSTCPService::close(IncludeOSTCPHandle& h, error_code& ec)
 {
+  ec = error_code();
+  if (h.closed || !h.socket)
+  {
+    if (debug_net) printf("not closing again\n");
+    return ec;
+  }
+  if (debug_net) printf("closing\n");
+  h.socket->close(); // will it call on_close?
   ec = error_code();
   return ec;
 }
@@ -327,6 +393,8 @@ boost::system::error_code IncludeOSTCPService::cancel(IncludeOSTCPHandle& h, err
 }
 boost::system::error_code IncludeOSTCPService::shutdown(IncludeOSTCPHandle& h, boost::asio::socket_base::shutdown_type, error_code& ec)
 {
+  if (debug_net) printf("shutdown\n");
+  //close(h, ec);
   ec = error_code();
   return ec;
 }
@@ -339,13 +407,13 @@ boost::asio::ip::tcp::endpoint
 IncludeOSTCPService::local_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const
 {
   auto s = h.socket->local();
-  return endpoint(boost::asio::ip::address_v4(s.address().whole), s.port());
+  return endpoint(boost::asio::ip::address_v4(::ntohl(s.address().whole)), s.port());
 }
 boost::asio::ip::tcp::endpoint
 IncludeOSTCPService::remote_endpoint(IncludeOSTCPHandle const& h, error_code& ec) const
 {
   auto s = h.socket->remote();
-  return endpoint(boost::asio::ip::address_v4(s.address().whole), s.port());
+  return endpoint(boost::asio::ip::address_v4(::ntohl(s.address().whole)), s.port());
 }
 
 void IncludeOSTCPService::async_connect(IncludeOSTCPHandle& h, endpoint ep, CH cb)
@@ -365,14 +433,15 @@ void IncludeOSTCPService::async_receive(
 {
   if (h.closed)
   {
+    if (debug_net) printf("async_receive on closed sock\n");
     new reactor::Thread("closed", [cb] { cb(boost::asio::error::eof, 0);}, true);
     return;
   }
   if (h.on_read_buffer)
-    printf("Warning, multiple // calls to async_receive!\n");
+    if (debug_net) printf("Warning, multiple // calls to async_receive!\n");
   auto mbs = boost::asio::buffer_size(mb);
   auto mbdata = boost::asio::buffer_cast<char*>(mb);
-  printf("async_receive %d, buffered=%d\n", (int)mbs, (int)h.read_buffer.size());
+  if (debug_net) printf("async_receive %d, buffered=%d\n", (int)mbs, (int)h.read_buffer.size());
   if (!h.read_buffer.empty())
   {
     auto rsz = std::min(mbs, h.read_buffer.size());
@@ -380,18 +449,19 @@ void IncludeOSTCPService::async_receive(
     memmove((void*)h.read_buffer.data(), h.read_buffer.data()+rsz,
       h.read_buffer.size() - rsz);
     h.read_buffer.resize(h.read_buffer.size()-rsz);
-    printf("remaining in buffer: %d\n", (int)h.read_buffer.size());
+    if (debug_net) printf("remaining in buffer: %d\n", (int)h.read_buffer.size());
     new reactor::Thread("onread", [cb, rsz] { cb(error_code(), rsz);}, true);
     wake_scheduler();
   }
   else
   {
     if (h.on_read_buffer)
-      printf("Warning, multiple // calls to async_receive!\n");
+      if (debug_net) printf("Warning, multiple // calls to async_receive!\n");
     h.on_read_buffer = mbdata;
     h.on_read_buffer_size = mbs;
     h.on_read = cb;
-    printf("arming waiter=%d\n", (int)mbs);
+    h.source_buffer = mb;
+    if (debug_net) printf("arming waiter=%d at %x\n", (int)mbs, (void*)h.on_read_buffer);
   }
 }
 void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
@@ -400,32 +470,41 @@ void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
 {
   if (h.closed)
   {
+    if (debug_net) printf("async_send on closed sock\n");
     new reactor::Thread("closed", [wh] { wh(boost::asio::error::eof, 0);}, true);
     return;
   }
   auto mbs = boost::asio::buffer_size(cb);
   auto mbdata = boost::asio::buffer_cast<const char*>(cb);
   h.on_write = wh;
-  h.socket->write(mbdata, mbs, [&h, wh](size_t len) {
+  h.socket->write(mbdata, mbs, [&h, wh, cb](size_t len) {
       h.on_write = decltype(h.on_write)();
+      if (h.closed)
+        if (debug_net) printf("write CB after close\n");
       new reactor::Thread("async_send", [wh, len] { wh(error_code(), len);}, true);
       wake_scheduler();
   });
 }
  
- 
+IncludeOSTCPHandle::IncludeOSTCPHandle()
+  : on_read_buffer(nullptr)
+  , closed(false)
+{}
  
 void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
 {
   socket = c;
   socket->on_read(4096, [this] (net::tcp::buffer_t sdata, size_t sz) {
-      printf("on_read %d, buffered=%d waiter=%d\n",
-        (int)sz, (int)this->read_buffer.size(), (int)this->on_read_buffer_size);
+      if (this->closed)
+        if (debug_net) printf("Weird onread after close\n");
+      if (debug_net) printf("on_read %d, buffered=%d waiter=%d at %x\n",
+        (int)sz, (int)this->read_buffer.size(), (int)this->on_read_buffer_size,
+        (void*)this->on_read_buffer);
       unsigned char* data = sdata.get();
       if (this->on_read_buffer)
       {
         if (!read_buffer.empty())
-          printf("WARNING IMPOSSIBLE STATE\n");
+          if (debug_net) printf("WARNING IMPOSSIBLE STATE\n");
         auto rsz = std::min(sz, this->on_read_buffer_size);
         memcpy(this->on_read_buffer, data, rsz);
         sz -= rsz;
@@ -440,21 +519,35 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
       }
       else
         read_buffer.append((char*)data, (char*)data + sz);
-      printf("rb remain: %d\n", (int)read_buffer.size());
+      if (debug_net) printf("rb remain: %d\n", (int)read_buffer.size());
   });
   socket->on_close([this] () {
-      printf("ON_CLOSE\n");
+      if (debug_net) printf("ON_CLOSE\n");
       this->closed = true;
       if (this->on_read)
       {
-        on_read(boost::asio::error::eof, 0);
+        if (debug_net) printf("NOT notifying reader\n");
+        /*new reactor::Thread("nr", [on_read=on_read] { 
+            on_read(boost::asio::error::eof, 0);
+        }, true);*/
         on_read = decltype(on_read)();
       }
       if (this->on_write)
       {
-        on_write(boost::asio::error::eof, 0);
+        if (debug_net) printf("notifying writer\n");
+        new reactor::Thread("nr", [on_write=on_write] { 
+            on_write(boost::asio::error::eof, 0);
+        }, true);
         on_write = decltype(on_write)();
       }
+      /*new reactor::Thread("holder", [socket=this->socket] {
+          if (debug_net) printf("NOT releasing socket\n");
+          new net::tcp::Connection_ptr(socket);
+          reactor::sleep(1_sec);
+      }, true);*/
+      wake_scheduler();
+      new net::tcp::Connection_ptr(socket);
+      this->socket.reset();
   });
 }
 
@@ -480,13 +573,15 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
   }
   size_t IncludeOSTimerService::cancel(IncludeOSTimerImpl& mt, error_code& erc)
   {
+    //if (debug_net) printf("canceling timer\n");
     erc = error_code();
     if (mt.timer_id != Timers::UNUSED_ID)
       Timers::stop(mt.timer_id);
     mt.timer_id =Timers::UNUSED_ID;
     for (auto const& wh: mt.listeners)
     {
-      wh(boost::asio::error::operation_aborted);;
+      //wh(boost::asio::error::operation_aborted);;
+      new reactor::Thread("tcancel", [wh] { wh(boost::asio::error::operation_aborted);}, true);
     }
     size_t count = mt.listeners.size();
     mt.listeners.clear();
@@ -523,7 +618,9 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
     auto now = TimeTraits::now();
     if (mt.expiration <= now)
     {
-      Timers::oneshot(std::chrono::milliseconds(0), [cb](int) { cb(error_code());});
+      //Timers::oneshot(std::chrono::milliseconds(0), [cb](int) { cb(error_code());});
+      new reactor::Thread("timer0", [cb] { cb(error_code());}, true);
+      wake_scheduler();
       return;
     }
     mt.listeners.push_back(cb);
@@ -537,7 +634,7 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
           mt.listeners.clear();
           mt.timer_id = Timers::UNUSED_ID;
           for (auto& cb: cbs)
-            cb(error_code());
+             new reactor::Thread("timer0", [cb] { cb(error_code());}, true);
           wake_scheduler();
       });
     }

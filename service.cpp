@@ -105,9 +105,10 @@ void init_infinit()
     dht::overlay_builder = overlay,
     dht::port = 6666,
     dht::storage = std::move(storage),
-    dht::protocol = dht::Protocol::all
+    dht::protocol = dht::Protocol::all,
+    dht::rdv_host = std::string("198.211.96.217:7890")
     );
-  printf("DONE");
+  printf("DONE\n");
 }
 
 void init_tcp()
@@ -158,25 +159,160 @@ public:
   NAMED_ARGUMENT(nacanard);
   StaticInit()
   {
-    printf("STATIC INIT\n");
-    write(1, "SINIT\n", 6);
-    write(2, "TINIT\n", 6);
+    initialized = 4242;
+    sinit = "some allocated string";
   }
-  
+  int initialized;
+  std::string sinit;
 };
+
+void heapstats()
+{
+  printf("heap %d\n", OS::heap_usage());
+  Timers::oneshot(std::chrono::milliseconds(999), [](int) { heapstats();});
+}
 // OK
 NAMED_ARGUMENT_DEFINE(nacanard, StaticInit);
 //extern "C" void __cxx_global_var_init64() {}
 //extern "C" void __cxx_global_var_init57() {}
 extern "C" void __cxx_global_var_init();
-extern "C" void __do_global_ctors_aux();
+//extern "C" void __do_global_ctors_aux();
 extern "C" void _init();
 StaticInit test;
+
+namespace elle
+{
+  namespace log
+  {
+    std::string mirage_log_level(std::string const&);
+  }
+}
+extern "C" void __cxx_global_var_init45 ();  
+extern "C" void __cxx_global_var_init46 ();
+extern "C" void __cxx_global_var_init47 ();
+extern "C" void __cxx_global_var_init48 ();
+extern "C" void __cxx_global_var_init49 ();
+extern "C" void __cxx_global_var_init   ();
+extern "C" void __cxx_global_var_init1  ();
+extern "C" void __cxx_global_var_init2  ();
+extern "C" void __cxx_global_var_init21 ();
+extern "C" void __cxx_global_var_init22 ();
+extern "C" void __cxx_global_var_init23 ();
+extern "C" void __cxx_global_var_init3  ();
+extern "C" void __cxx_global_var_init39 ();
+extern "C" void __cxx_global_var_init4  ();
+extern "C" void __cxx_global_var_init5  ();
+extern "C" void __cxx_global_var_init6  ();
+extern "C" void __cxx_global_var_init7  ();
+extern "C" void __cxx_global_var_init120();
+extern "C" void __cxx_global_var_init121();
+extern "C" void __cxx_global_var_init122();
+extern "C" void __cxx_global_var_init15 ();
+extern "C" void __cxx_global_var_init17 ();
+extern "C" void __cxx_global_var_init13 ();
+extern "C" void __cxx_global_var_init14 ();
+extern "C" void __cxx_global_var_init25 ();
+extern "C" void __cxx_global_var_init55 ();
+extern "C" void __sinit();
+
+
+void invoke_ctors()
+{
+  unsigned char* cinit = (unsigned char*)&_init;
+  printf("init at %x\n", cinit);
+  cinit += 3;
+  if (*cinit != 0xe8)
+  {
+    printf("BAD INSTRUCTION\n");
+    return;
+  }
+  unsigned int raddr = cinit[1] + (cinit[2]<<8) + (cinit[3] << 16) + (cinit[4] << 24);
+  unsigned int tgt = (unsigned int)cinit + raddr + 5;
+  printf("dgct is at %x\n", tgt);
+  unsigned char* ctcode = (unsigned char*)tgt;//(unsigned char*)&__do_global_ctors_aux;
+  if (ctcode[0] != 0xa1)
+  {
+    printf("BAD INSTRUCTION 2\n");
+    return;
+  }
+  unsigned int secstart = ctcode[1] + (ctcode[2] << 8) + (ctcode[3] << 16) + (ctcode[4] << 24);
+  printf(".ctors is at %x\n", secstart);
+  void** ctors = (void**)secstart;
+  void* end = (void*)-1;
+  /*
+  int idx = 0;
+  while(*ctors != end)
+  {
+    printf(" invoking ctor %d at %x\n", idx, *ctors);
+    //if (idx != 7)
+    {
+      void (*f)(void) = (void(*)())*ctors;
+      f();
+    }
+    --ctors;
+    ++idx;
+  }*/
+  while (*ctors != end)
+    --ctors;
+  ++ctors;
+  int idx = 0;
+  while (*ctors)
+  {
+    printf(" invoking ctor %d at %x\n", idx, *ctors);
+    //if (idx != 7)
+    {
+      void (*f)(void) = (void(*)())*ctors;
+      f();
+    }
+    ++ctors;
+    ++idx;
+  }
+}
+
 void Service::start(const std::string&)
 {
+  printf("INVOKING INIT\n");
+  //invoke_ctors();
+  _init();
+  //__sinit();
+  //std::__1::ctype<char>
+  printf("initialized? %d\n", test.initialized);
+  printf("init? %s\n", test.sinit.c_str());
+  elle::log::mirage_log_level("DEBUG");
   printf("%d %d %d %d\n", (int)ntohl(1), (int)ntohl(0x100), (int)ntohs(1), (int)htons(0x100));
+#if 0
+   __cxx_global_var_init45  ();
+__cxx_global_var_init46    ();
+__cxx_global_var_init47    ();
+__cxx_global_var_init48    ();
+__cxx_global_var_init49    ();
+__cxx_global_var_init      ();
+__cxx_global_var_init1     ();
+__cxx_global_var_init2     ();
+//__cxx_global_var_init21    ();
+//__cxx_global_var_init22    ();
+//__cxx_global_var_init23    ();
+__cxx_global_var_init3     ();
+//__cxx_global_var_init39    ();
+__cxx_global_var_init4     ();
+__cxx_global_var_init5     ();
+__cxx_global_var_init6     ();
+__cxx_global_var_init7     ();
+__cxx_global_var_init120   ();
+__cxx_global_var_init121   ();
+__cxx_global_var_init122   ();
+__cxx_global_var_init15    ();
+__cxx_global_var_init17    ();
+__cxx_global_var_init13    ();
+__cxx_global_var_init14    ();
+__cxx_global_var_init25    ();
+__cxx_global_var_init55    ();
+  #endif
+  
+  
+  
   setenv("ELLE_LOG_LEVEL", "DUMP", 1);
-  setenv("INFINIT_RDV", "", 1);
+  //setenv("INFINIT_RDV", "", 1);
   setenv("INFINIT_NO_IPV6", "1", 1);
   printf("Hello world - OS included!\n");
   write(1, "COIN\n", 5);
@@ -206,8 +342,9 @@ void Service::start(const std::string&)
   printf("Hello world: arming... !\n");
   Timers::oneshot(std::chrono::milliseconds(100), [](int) { sched_step();});
   
-  new reactor::Thread(*sched, "init_udp", [] {init_udp();}, true);
-  new reactor::Thread(*sched, "init_tcp", [] {init_tcp();}, true);
+  //new reactor::Thread(*sched, "init_udp", [] {init_udp();}, true);
+  //new reactor::Thread(*sched, "init_tcp", [] {init_tcp();}, true);
+  Timers::oneshot(std::chrono::milliseconds(100), [](int) { heapstats();});
 }
 
 #define NS_INADDRSZ 4
@@ -444,6 +581,7 @@ inet_ntop6(const unsigned char *src, char* dst, socklen_t size)
 }
 
 
+
 extern "C"  const char *inet_ntop(int af, const void *src,
                              char *dst, socklen_t size)
 {
@@ -451,10 +589,10 @@ extern "C"  const char *inet_ntop(int af, const void *src,
     return inet_ntop6((const unsigned char*)src, dst, size);
   const unsigned char* csrc = (const unsigned char*)src;
   sprintf(dst, "%d.%d.%d.%d",
-    (unsigned int)csrc[3],
-    (unsigned int)csrc[2],
+    (unsigned int)csrc[0],
     (unsigned int)csrc[1],
-    (unsigned int)csrc[0]);
+    (unsigned int)csrc[2],
+    (unsigned int)csrc[3]);
   return dst;
 }
 

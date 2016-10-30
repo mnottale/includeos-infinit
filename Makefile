@@ -7,7 +7,7 @@ SERVICE = IncludeOS_service
 SERVICE_NAME = My IncludeOS Service
 
 # Your service parts
-FILES = service.cpp dummies.cpp includeos-asio.cpp
+FILES = empty.cpp
 
 # Your disk image
 DISK=
@@ -32,7 +32,7 @@ DRIVERS=virtionet
 # 4.4M: bad
 EXTRA_LIBS =  \
     -whole-archive infinit/lib/libinfinit.a -no-whole-archive \
-    infinit/elle/cryptography/lib/libcryptography.a \
+    -whole-archive infinit/elle/cryptography/lib/libcryptography.a -no-whole-archive \
     infinit/elle/protocol/lib/libprotocol.a \
     -whole-archive infinit/elle/reactor/lib/libreactor.a -no-whole-archive \
     infinit/elle/reactor/libutp/lib/libutp.a \
@@ -69,7 +69,9 @@ LOCAL_INCLUDES= \
  -DBOOST_ASIO_BASIC_SERIAL_PORT_HPP \
  -DBOOST_ASIO_SERIAL_PORT_BASE_HPP \
  -DBOOST_ASIO_SERIAL_PORT_HPP \
- -DBOOST_ASIO_SERIAL_PORT_SERVICE_HPP 
+ -DBOOST_ASIO_SERIAL_PORT_SERVICE_HPP \
+ -DELLE_LOG_DISABLE \
+ -DELLE_TEST_NO_MEMFRY
 
 # IncludeOS location
 ifndef INCLUDEOS_INSTALL

@@ -32,6 +32,7 @@ public:
   void* on_read_buffer;
   size_t on_read_buffer_size;
   std::function<void(const boost::system::error_code& ec, std::size_t)> on_read;
+  std::function<void(const boost::system::error_code& ec, std::size_t)> on_write;
 };
 
 class IncludeOSUDPService: public boost::asio::io_service::service
@@ -103,10 +104,7 @@ IncludeOSUDPSocket;
 class IncludeOSTCPHandle
 {
 public:
-  IncludeOSTCPHandle()
-   : on_read_buffer(nullptr)
-   , closed(false)
-  {}
+  IncludeOSTCPHandle();
   IncludeOSTCPHandle(IncludeOSTCPHandle const& b) = default;
   IncludeOSTCPHandle(IncludeOSTCPHandle&& b) = default;
   void assign(net::tcp::Connection_ptr c);
@@ -114,6 +112,7 @@ public:
   std::string read_buffer;
   void* on_read_buffer;
   size_t on_read_buffer_size;
+  boost::asio::mutable_buffer source_buffer;
   std::function<void(const boost::system::error_code& ec, std::size_t)> on_read;
   std::function<void(const boost::system::error_code& ec, std::size_t)> on_write;
   bool closed;
@@ -151,7 +150,7 @@ public:
   template<typename P>
   error_code assign(IncludeOSTCPHandle& s, P p, void* n, error_code& ec)
   {
-    s.assign(net::tcp::Connection_ptr((net::tcp::Connection*)n));
+    s.assign(net::tcp::Connection_ptr(*(net::tcp::Connection_ptr*)n));
     ec = error_code();
     return ec;
   }
