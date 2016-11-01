@@ -50,12 +50,21 @@ void sched_step()
   //Timers::oneshot(std::chrono::milliseconds(100), [](int) { sched_step();});
 }
 
+void checked_step(int)
+{
+  if (!reactor::scheduler().current())
+    sched_step();
+  else
+  {
+    Timers::oneshot(std::chrono::microseconds(100), checked_step);
+  }
+}
 void wake_scheduler()
 {
-  if (scheduler_sleeping)
+  if (true) // scheduler_sleeping)
   {
     scheduler_sleeping = false;
-    Timers::oneshot(std::chrono::milliseconds(0), [](int) { sched_step();});
+    Timers::oneshot(std::chrono::microseconds(100), checked_step);
   }
 }
 
@@ -168,8 +177,9 @@ public:
 
 void heapstats()
 {
-  printf("heap %d\n", OS::heap_usage());
-  Timers::oneshot(std::chrono::milliseconds(999), [](int) { heapstats();});
+  //printf("heap %d\n", OS::heap_usage());
+  wake_scheduler();
+  Timers::oneshot(std::chrono::seconds(1), [](int) { heapstats();});
 }
 // OK
 NAMED_ARGUMENT_DEFINE(nacanard, StaticInit);
@@ -619,16 +629,19 @@ extern "C" int fnmatch(const char *pattern, const char *string, int flags)
     //printf("fnmatch %s %s\n", pattern, string);
     std::string pat(pattern);
     std::string str(string);
+    int res = FNM_NOMATCH;
     if (pat == "*")
-      return 0;
-    if (pat[0] == '*' && pat[pat.size()-1] == '*')
-      return (str.find(pat.substr(1, pat.size()-2)) == str.npos) ? FNM_NOMATCH : 0;
-    if (pat[0] == '*')
-      return (str.find(pat.substr(1)) == str.size() - pat.size()-1) ? 0 : FNM_NOMATCH;
-    if (pat[pat.size()-1] == '*')
-      return (str.find(pat.substr(1)) == 0) ? 0 : FNM_NOMATCH;
-    return pat == str ? 0 : FNM_NOMATCH;
-    return FNM_NOMATCH;
+      res=  0;
+    else if (pat[0] == '*' && pat[pat.size()-1] == '*')
+      res = (str.find(pat.substr(1, pat.size()-2)) == str.npos) ? FNM_NOMATCH : 0;
+    else if (pat[0] == '*')
+      res = (str.find(pat.substr(1)) == str.size() - pat.size()-1) ? 0 : FNM_NOMATCH;
+    else if (pat[pat.size()-1] == '*')
+      res = (str.find(pat.substr(0, pat.size()-1)) == 0) ? 0 : FNM_NOMATCH;
+    else
+      res = (pat == str) ? 0 : FNM_NOMATCH;
+    printf("fnmatch %s %s -> %d\n", pattern, string, res);
+    return res;
   }
   
 namespace boost

@@ -6,8 +6,9 @@
  #include <reactor/scheduler.hh>
  using namespace net;
  void wake_scheduler();
- 
- static const bool debug_net = false;
+ void sched_step();
+
+ static const bool debug_net = true;
  net::Inet4& get_stack()
  {
    static net::Inet4& stack = net::Inet4::ifconfig<0>(10);
@@ -22,7 +23,26 @@
    }
    return stack;
  }
- 
+void schedule(std::function<void()> f, bool force_async = false)
+{
+  if (false && force_async)
+  {
+    new reactor::Thread("async", [f] { f();}, true);
+    wake_scheduler();
+  }
+  else
+  {
+    new reactor::Thread("async", [f] { f();}, true);
+    if (!reactor::scheduler().current())
+      sched_step();
+    //debug
+    wake_scheduler();
+    //f();
+    //wake_scheduler();
+    //sched_step();
+  }
+}
+
    IncludeOSUDPService::IncludeOSUDPService(boost::asio::io_service& io)
     : boost::asio::io_service::service(io)
     , stack(get_stack())
@@ -43,15 +63,15 @@
     to.local_port = from.local_port;
     from.local_port = -1;
   }
-  
-  
+
+
   bool IncludeOSUDPService::is_open(IncludeOSUDPHandle const& h) const
   {
     return h.socket;
   }
   boost::system::error_code IncludeOSUDPService::close(IncludeOSUDPHandle& h, error_code& erc)
   {
-    
+
   }
   int IncludeOSUDPService::native_handle(IncludeOSUDPHandle& h)
   {
@@ -67,7 +87,7 @@
       auto handler = h.on_read;
       h.on_read = decltype(h.on_read)();
       h.on_read_buffer = nullptr;
-      new reactor::Thread("cancel", [handler] {
+      schedule([handler] {
           handler(boost::asio::error::operation_aborted, 0);
       }, true);
     }
@@ -75,11 +95,10 @@
     {
       auto handler = h.on_write;
       h.on_write = decltype(h.on_write)();
-      new reactor::Thread("cancel", [handler] {
+      schedule([handler] {
           handler(boost::asio::error::operation_aborted, 0);
       }, true);
     }
-    wake_scheduler();
     ec = error_code();
     return ec;
   }
@@ -110,10 +129,9 @@
           auto cb = s.on_read;
           s.on_read = RH();
           if (debug_net) printf("INVOKE CB %d\n", sz);
-          new reactor::Thread("recvfrom_cb", [cb, sz] {
+          schedule([cb, sz] {
               cb(error_code(), sz);
-          }, true);
-          wake_scheduler();
+          });
         }
         else
         { // queue for later
@@ -160,15 +178,14 @@
       if (&e)
         e = h.read_buffers.front().second;
       h.read_buffers.erase(h.read_buffers.begin());
-      new reactor::Thread("recvfrom_direct_cb", [rh, sz] {
+      schedule( [rh, sz] {
             rh(error_code(), sz);
         }, true);
-      wake_scheduler();
     }
     else
     {
       if (h.on_read)
-        if (debug_net) printf("Warning, multiple parallel calls to async_receive_from\n");
+        printf("Warning, multiple parallel calls to async_receive_from\n");
       h.on_read = rh;
       h.on_read_buffer = data;
       h.on_read_buffer_size = bsz;
@@ -209,11 +226,10 @@
           return;
         }
         h.on_write = decltype(h.on_write)();
-        new reactor::Thread("sendto_cb", [wh, bsize] {
+        schedule([wh, bsize] {
             wh(error_code(), bsize);
             if (debug_net) printf("sendto CB backend wh called\n");
-        }, true);
-        wake_scheduler();
+        });
       });
     /*
         Timers::oneshot(std::chrono::milliseconds(0), [wh, bsize](int) {
@@ -281,10 +297,9 @@ IncludeOSTCPAcceptorService::cancel(IncludeOSTCPAcceptorHandle& h, error_code& e
     h.cb = decltype(h.cb)();
     h.target = nullptr;
     h.target_endpoint = nullptr;
-    new reactor::Thread("cancel", [handler] {
+    schedule( [handler] {
       handler(boost::asio::error::operation_aborted);
     }, true);
-    wake_scheduler();
   }
   ec = error_code();
   return ec;
@@ -322,8 +337,7 @@ boost::system::error_code IncludeOSTCPAcceptorService::bind(
         h.target = nullptr;
         h.target_endpoint = nullptr;
         if (debug_net) printf("signaling\n");
-        new reactor::Thread("connect_cb", [f] { f(error_code());}, true);
-        wake_scheduler();
+        schedule([f] { f(error_code());});
       }
       else
         h.inbounds.push_back(c);
@@ -346,8 +360,7 @@ void IncludeOSTCPAcceptorService::async_accept(IncludeOSTCPAcceptorHandle& h,
      *ep = endpoint(
        boost::asio::ip::address_v4(::ntohl(c->remote().address().whole)),
        c->remote().port());
-    new reactor::Thread("connect_direct_cb", [ah] { ah(error_code());}, true);
-    wake_scheduler();
+    schedule([ah] { ah(error_code());}, true);
   }
   else
   {
@@ -398,8 +411,8 @@ boost::system::error_code IncludeOSTCPService::shutdown(IncludeOSTCPHandle& h, b
   ec = error_code();
   return ec;
 }
-  
-  
+
+
 void IncludeOSTCPService::shutdown_service()
 {
 }
@@ -421,12 +434,11 @@ void IncludeOSTCPService::async_connect(IncludeOSTCPHandle& h, endpoint ep, CH c
   net::tcp::Socket s(net::ip4::Addr(ep.address().to_v4().to_ulong()), ep.port());
   stack.tcp().connect(s, [&h, cb](net::tcp::Connection_ptr c) {
       h.assign(c);
-      new reactor::Thread("connect", [cb] { cb(error_code());}, true);
-      wake_scheduler();
+      schedule([cb] { cb(error_code());});
   });
 }
- 
- 
+
+
 void IncludeOSTCPService::async_receive(
   IncludeOSTCPHandle& h, boost::asio::mutable_buffer mb,
   socket_base::message_flags f, RH cb)
@@ -434,13 +446,15 @@ void IncludeOSTCPService::async_receive(
   if (h.closed)
   {
     if (debug_net) printf("async_receive on closed sock\n");
-    new reactor::Thread("closed", [cb] { cb(boost::asio::error::eof, 0);}, true);
+    schedule([cb] { cb(boost::asio::error::eof, 0);}, true);
     return;
   }
   if (h.on_read_buffer)
-    if (debug_net) printf("Warning, multiple // calls to async_receive!\n");
+    printf("Warning, multiple // calls to async_receive!\n");
   auto mbs = boost::asio::buffer_size(mb);
   auto mbdata = boost::asio::buffer_cast<char*>(mb);
+  if (!mbs || !mbdata)
+    printf("####### null buffers not handled!\n");
   if (debug_net) printf("async_receive %d, buffered=%d\n", (int)mbs, (int)h.read_buffer.size());
   if (!h.read_buffer.empty())
   {
@@ -450,13 +464,12 @@ void IncludeOSTCPService::async_receive(
       h.read_buffer.size() - rsz);
     h.read_buffer.resize(h.read_buffer.size()-rsz);
     if (debug_net) printf("remaining in buffer: %d\n", (int)h.read_buffer.size());
-    new reactor::Thread("onread", [cb, rsz] { cb(error_code(), rsz);}, true);
-    wake_scheduler();
+    schedule([cb, rsz] { cb(error_code(), rsz);}, true);
   }
   else
   {
     if (h.on_read_buffer)
-      if (debug_net) printf("Warning, multiple // calls to async_receive!\n");
+      printf("Warning, multiple // calls to async_receive!\n");
     h.on_read_buffer = mbdata;
     h.on_read_buffer_size = mbs;
     h.on_read = cb;
@@ -464,6 +477,23 @@ void IncludeOSTCPService::async_receive(
     if (debug_net) printf("arming waiter=%d at %x\n", (int)mbs, (void*)h.on_read_buffer);
   }
 }
+static
+void
+flush_and_cont(int i, IncludeOSTCPHandle& h, size_t len,
+  IncludeOSTCPService::RH wh)
+{
+  if (h.socket->sendq_size() || !h.socket->is_writable())
+  {
+    if (debug_net) printf("delaying on_write...\n");
+    Timers::oneshot(std::chrono::milliseconds(1),
+      [&h, len, wh] (int i) {
+        flush_and_cont(i, h, len, wh);
+      });
+  }
+  else
+    schedule([wh, len] { wh(boost::system::error_code(), len);});
+}
+
 void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
                                      boost::asio::const_buffer cb,
                                      socket_base::message_flags f, RH wh)
@@ -471,30 +501,53 @@ void IncludeOSTCPService::async_send(IncludeOSTCPHandle& h,
   if (h.closed)
   {
     if (debug_net) printf("async_send on closed sock\n");
-    new reactor::Thread("closed", [wh] { wh(boost::asio::error::eof, 0);}, true);
+    schedule([wh] { wh(boost::asio::error::eof, 0);}, true);
     return;
   }
+  if (h.on_write)
+    printf("###### async_send already running\n");
   auto mbs = boost::asio::buffer_size(cb);
   auto mbdata = boost::asio::buffer_cast<const char*>(cb);
+  if (!mbs || !mbdata)
+    printf("####### null buffers not handled!\n");
   h.on_write = wh;
+  if (debug_net)
+    printf("async_send %d bytes\n", (int)mbs);
   h.socket->write(mbdata, mbs, [&h, wh, cb](size_t len) {
-      h.on_write = decltype(h.on_write)();
-      if (h.closed)
-        if (debug_net) printf("write CB after close\n");
-      new reactor::Thread("async_send", [wh, len] { wh(error_code(), len);}, true);
-      wake_scheduler();
   });
+
+  h.on_write = decltype(h.on_write)();
+  if (h.closed)
+    if (debug_net) printf("write CB after close\n");
+  if (debug_net)
+    printf("async_send_callback with %d bytes\n", (int)mbs);
+  Timers::oneshot(std::chrono::milliseconds(1), [wh, mbs](int) {
+      schedule([wh, mbs] { wh(error_code(), mbs);});
+  });
+      /*Timers::oneshot(std::chrono::milliseconds(2),
+        [&h, len, wh] (int i) {
+          flush_and_cont(i, h, len, wh);
+        });*/
+      //flush_and_cont(0, h, len, wh);
+      /*
+      Timers::oneshot(std::chrono::milliseconds(10), [wh, len](int) {
+          schedule([wh, len] { wh(error_code(), len);});
+      });*/
+      //schedule([wh, len] { reactor::sleep(1_sec); wh(error_code(), len);});
+      if (debug_net)
+        printf("async_send_callback exited\n");
+      // });
 }
- 
+
 IncludeOSTCPHandle::IncludeOSTCPHandle()
   : on_read_buffer(nullptr)
   , closed(false)
 {}
- 
+
 void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
 {
   socket = c;
-  socket->on_read(4096, [this] (net::tcp::buffer_t sdata, size_t sz) {
+  socket->on_read(65536, [this] (net::tcp::buffer_t sdata, size_t sz) {
       if (this->closed)
         if (debug_net) printf("Weird onread after close\n");
       if (debug_net) printf("on_read %d, buffered=%d waiter=%d at %x\n",
@@ -504,7 +557,7 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
       if (this->on_read_buffer)
       {
         if (!read_buffer.empty())
-          if (debug_net) printf("WARNING IMPOSSIBLE STATE\n");
+          printf("WARNING IMPOSSIBLE STATE\n");
         auto rsz = std::min(sz, this->on_read_buffer_size);
         memcpy(this->on_read_buffer, data, rsz);
         sz -= rsz;
@@ -514,8 +567,10 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
         this->on_read_buffer_size = 0;
         auto cb = this->on_read;
         this->on_read = decltype(this->on_read)();
-        new reactor::Thread("on_read", [cb, rsz] { cb(boost::system::error_code(), rsz);}, true);
-        wake_scheduler();
+        schedule([cb, rsz] {
+            if (debug_net) printf("invoking on_read cb with %d\n", rsz);
+            cb(boost::system::error_code(), rsz);
+        });
       }
       else
         read_buffer.append((char*)data, (char*)data + sz);
@@ -526,16 +581,16 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
       this->closed = true;
       if (this->on_read)
       {
-        if (debug_net) printf("NOT notifying reader\n");
-        /*new reactor::Thread("nr", [on_read=on_read] { 
+        if (debug_net) printf("notifying reader\n");
+        schedule([on_read=on_read] {
             on_read(boost::asio::error::eof, 0);
-        }, true);*/
+        });
         on_read = decltype(on_read)();
       }
       if (this->on_write)
       {
         if (debug_net) printf("notifying writer\n");
-        new reactor::Thread("nr", [on_write=on_write] { 
+        schedule([on_write=on_write] {
             on_write(boost::asio::error::eof, 0);
         }, true);
         on_write = decltype(on_write)();
@@ -545,8 +600,9 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
           new net::tcp::Connection_ptr(socket);
           reactor::sleep(1_sec);
       }, true);*/
-      wake_scheduler();
-      new net::tcp::Connection_ptr(socket);
+      schedule([socket=this->socket] {
+      });
+      //new net::tcp::Connection_ptr(socket);
       this->socket.reset();
   });
 }
@@ -581,11 +637,10 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
     for (auto const& wh: mt.listeners)
     {
       //wh(boost::asio::error::operation_aborted);;
-      new reactor::Thread("tcancel", [wh] { wh(boost::asio::error::operation_aborted);}, true);
+      schedule([wh] { wh(boost::asio::error::operation_aborted);}, true);
     }
     size_t count = mt.listeners.size();
     mt.listeners.clear();
-    wake_scheduler();
     return count;
   }
   IncludeOSTimerService::Time IncludeOSTimerService::expires_at(IncludeOSTimerImpl const& mt)
@@ -619,8 +674,7 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
     if (mt.expiration <= now)
     {
       //Timers::oneshot(std::chrono::milliseconds(0), [cb](int) { cb(error_code());});
-      new reactor::Thread("timer0", [cb] { cb(error_code());}, true);
-      wake_scheduler();
+      schedule([cb] { cb(error_code());}, true);
       return;
     }
     mt.listeners.push_back(cb);
@@ -634,8 +688,7 @@ void IncludeOSTCPHandle::assign(net::tcp::Connection_ptr c)
           mt.listeners.clear();
           mt.timer_id = Timers::UNUSED_ID;
           for (auto& cb: cbs)
-             new reactor::Thread("timer0", [cb] { cb(error_code());}, true);
-          wake_scheduler();
+             schedule([cb] { cb(error_code());});
       });
     }
   }
